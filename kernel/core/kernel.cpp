@@ -6,62 +6,113 @@
 #include <memory/pmm.hpp>
 #include <memory/vmm.hpp>
 #include <utils/io.hpp>
+#include <system/setup/setup.hpp>
+#include <system/login/login.hpp>
+#include <system/config/config.hpp>
+#include <fs/fs.hpp>
+#include <drivers/disk/ata.hpp>
 
-#define MEM_START 0x1000000
-#define MEM_SIZE  MB(112)
+static bool is_first_boot = true;
 
 extern "C" void kernel_main(uint32_t magic, uint64_t multiboot_addr) {
     (void)multiboot_addr;
 
-    // 1. Init Serial (Wajib untuk Codespaces)
+    // =============================
+    // INIT SERIAL
+    // =============================
     Serial::init();
     Serial::writeln("==========================================");
     Serial::writeln("  MoonOS Booting (Codespaces Mode)");
     Serial::writeln("==========================================");
 
-    // 2. Validasi Multiboot
-    if (magic != MULTIBOOT2_MAGIC) {
-        Serial::writeln("[KERNEL] ERROR: Invalid multiboot2 magic!");
-        goto halt;
+    // =============================
+    // MULTIBOOT CHECK
+    // =============================
+    if (magic != MULTIBOOT2_MAGIC) goto halt;
+
+    // =============================
+    // ARCH INIT
+    // =============================
+    GDT::init();
+    IDT::init();
+
+    // Disable interrupt sementara (pakai polling)
+    __asm__ volatile ("cli");
+
+    // =============================
+    // SYSTEM INIT
+    // =============================
+    PMM::init(0x1000000, MB(112));
+    VMM::init();
+    Keyboard::init();
+    FS::init();
+    Config::init();
+
+    // =============================
+    // SETUP & LOGIN
+    // =============================
+    if (is_first_boot) {
+        run_setup();
+        is_first_boot = false;
     }
 
-    // 3. Inisialisasi Arsitektur
-    GDT::init();
-    Serial::writeln("[GDT] Initialized");
+    run_login();
 
-    IDT::init(); // Di dalam sini harus sudah ada pic_remap() dan sti
-    Serial::writeln("[IDT] Initialized & Interrupts Enabled");
+    // =============================
+    // ATA TEST (WAJIB DI SINI)
+    // =============================
+    ATA::init();
 
-    // 4. Inisialisasi Memory
-    PMM::init(MEM_START, MEM_SIZE);
-    VMM::init();
+    uint8_t buffer[512];
 
-    // 5. Inisialisasi Driver
-    Keyboard::init();
-    Serial::writeln("[Keyboard] Initialized");
+    // isi data
+    for (int i = 0; i < 512; i++) buffer[i] = 'X';
 
+    // WRITE
+    if (ATA::write_sector(1, buffer)) {
+        Serial::writeln("[TEST] Write OK");
+    } else {
+        Serial::writeln("[TEST] Write FAIL");
+    }
+
+    // clear buffer
+    for (int i = 0; i < 512; i++) buffer[i] = 0;
+
+    // READ
+    if (ATA::read_sector(1, buffer)) {
+        Serial::write("[TEST] Read: ");
+        for (int i = 0; i < 16; i++) {
+            Serial::write_char(buffer[i]);
+        }
+        Serial::write("\n");
+    } else {
+        Serial::writeln("[TEST] Read FAIL");
+    }
+
+    // =============================
+    // SHELL START
+    // =============================
+    Serial::writeln("\n==========================================");
+    Serial::writeln("  MoonOS Shell Active");
     Serial::writeln("==========================================");
-    Serial::writeln("  MoonOS Ready!");
-    Serial::writeln("  Type anything in this terminal...");
-    Serial::writeln("==========================================");
 
-    // 6. Main Loop (Hybrid Input)
-    int counter = 0;
+    // =============================
+    // MAIN LOOP (TERAKHIR!)
+    // =============================
     while (true) {
-        // 1. Cek apakah ada data masuk dari Serial (Codespaces mode)
         if (IO::inb(0x3F8 + 5) & 0x01) {
             char c = (char)IO::inb(0x3F8);
-            Serial::write("User typed: ");
-            Serial::write_char(c);
-            Serial::writeln("");
+
+            if (c == '\r') {
+                Serial::write("\r\n");
+            } else if (c == '\b' || c == '\x7f') {
+                Serial::write("\b \b");
+            } else if (c >= 0x20) {
+                Serial::write_char(c);
+            }
         }
 
-        // 2. Heartbeat: Cetak titik setiap beberapa juta siklus
-        if (counter++ % 10000000 == 0) {
-            Serial::write("."); 
-        }
-
-        __asm__ volatile ("pause"); // Biar gak panas-panas amat CPU-nya
+        __asm__ volatile ("pause");
     }
 
 halt:
