@@ -9,17 +9,26 @@
 void input_field(const char* label, char* buf, int max, bool hidden) {
     Serial::write(label);
     int idx = 0;
+    
     while (true) {
-        if (IO::inb(0x3F8 + 5) & 0x01) {
+        // Poll serial port for input (works with QEMU -serial stdio)
+        uint8_t status = IO::inb(0x3F8 + 5);
+        if (status & 0x01) {  // Data available
             char c = (char)IO::inb(0x3F8);
-            if (c == '\r' || c == '\n') {
+            
+            // Handle backspace
+            if ((c == '\b' || c == 0x7F) && idx > 0) {
+                idx--;
+                Serial::write("\b \b");
+            }
+            // Handle enter/return
+            else if (c == '\r' || c == '\n') {
                 buf[idx] = '\0';
                 Serial::write("\r\n");
                 return;
             }
-            if ((c == '\b' || c == '\x7f') && idx > 0) {
-                idx--; Serial::write("\b \b");
-            } else if (c >= 0x20 && idx < max - 1) {
+            // Handle regular printable characters
+            else if (c >= 0x20 && c < 0x7F && idx < max - 1) {
                 buf[idx++] = c;
                 Serial::write_char(hidden ? '*' : c);
             }

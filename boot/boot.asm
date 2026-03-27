@@ -18,7 +18,7 @@ p4_table: resb 4096
 p3_table: resb 4096
 p2_table: resb 4096
 
-align 16                        ; Stack harus 16-byte aligned
+align 16
 stack_bottom: resb 16384
 stack_top:
 
@@ -31,7 +31,7 @@ _start:
     mov edi, eax                ; Simpan magic multiboot
     mov esi, ebx                ; Simpan pointer multiboot
 
-    ; 1. Setup Paging sederhana (Identity Map 2MB pertama)
+    ; 1. Setup Paging sederhana (Identity Map 1GB pertama)
     call setup_page_tables
     call enable_paging
 
@@ -44,24 +44,23 @@ _start:
 setup_page_tables:
     ; Map P4 ke P3
     mov eax, p3_table
-    or eax, 0b11 ; present + writable
+    or eax, 0b11                ; present + writable
     mov [p4_table], eax
 
     ; Map P3 ke P2
     mov eax, p2_table
-    or eax, 0b11 ; present + writable
+    or eax, 0b11                ; present + writable
     mov [p3_table], eax
 
     ; Map P2 ke 1GB pertama menggunakan 2MB Huge Pages
-    mov ecx, 0         ; counter loop
+    mov ecx, 0
 .map_p2_table:
-    mov eax, 0x200000  ; 2MB
-    mul ecx            ; eax = 2MB * ecx
-    or eax, 0b10000011 ; present + writable + huge
+    mov eax, 0x200000           ; 2MB
+    mul ecx
+    or eax, 0b10000011          ; present + writable + huge
     mov [p2_table + ecx * 8], eax
-
-    inc ecx            ; counter++
-    cmp ecx, 512       ; apakah sudah 512 entri? (512 * 2MB = 1GB)
+    inc ecx
+    cmp ecx, 512
     jne .map_p2_table
     ret
 
@@ -89,32 +88,19 @@ enable_paging:
 
 [bits 64]
 long_mode_start:
-    ; Load null ke data segment registers
-    mov ax, 0
-    mov ss, ax
-    mov ds, ax
-    mov es, ax
-    mov fs, ax
-    mov gs, ax
-
-    ; Setup stack pointer (harus 16-byte aligned)
-    mov rsp, stack_top
-    
-    ; Align stack ke 16 bytes (System V AMD64 ABI requirement)
-    and rsp, -16
-    
-    ; Load data segment
+    ; Load data segment ke semua segment registers
     mov ax, gdt64.data
     mov ss, ax
     mov ds, ax
     mov es, ax
     mov fs, ax
     mov gs, ax
-    
-    ; Panggil kernel utama dengan argumen multiboot
-    ; EDI dan ESI sudah berisi magic dan pointer dari _start
-    ; (Multiboot loader set EAX dan EBX, kita save ke EDI/ESI di _start)
-    ; Dalam 64-bit, mov edi, edi akan zero-extend ke RDI
+
+    ; Setup stack pointer (16-byte aligned)
+    mov rsp, stack_top
+    and rsp, -16
+
+    ; Panggil kernel
     call kernel_main
 
     cli
@@ -122,13 +108,20 @@ long_mode_start:
     hlt
     jmp .hlt
 
+; ==========================================
+; GDT 64-bit (FIXED)
+; CRITICAL: Untuk code segment 64-bit:
+;   - L bit (bit 53) = 1  → 64-bit mode
+;   - D/B bit (bit 54) = 0 → WAJIB 0 jika L=1
+;   VirtualBox/hardware reject jika keduanya 1
+; ==========================================
 section .rodata
 gdt64:
-    dq 0 ; zero entry
+    dq 0                                        ; Null segment
 .code: equ $ - gdt64
-    dq (1<<44) | (1<<47) | (1<<53) | (1<<41) | (1<<40) | (1<<54) | (1<<55) | (1<<43) ; code segment 64-bit: P, S, L, R, A, E
+    dq (1<<43) | (1<<44) | (1<<47) | (1<<53)   ; Code: C=1, S=1, P=1, L=1, D=0
 .data: equ $ - gdt64
-    dq (1<<44) | (1<<47) | (1<<41) | (1<<54) | (1<<55) ; data segment
+    dq (1<<41) | (1<<44) | (1<<47) | (1<<54)   ; Data: W=1, S=1, P=1, D/B=1
 .pointer:
     dw $ - gdt64 - 1
     dq gdt64

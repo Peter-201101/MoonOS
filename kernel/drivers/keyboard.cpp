@@ -1,12 +1,13 @@
 // ==========================================
 // MoonOS - keyboard.cpp
-// PS/2 Keyboard driver
-// NOTE: Stub dulu, isi setelah IDT ready
+// PS/2 Keyboard driver with extended support
+// Arrow keys, Shift, Ctrl modifiers
 // ==========================================
 
 #include "keyboard.hpp"
 #include "serial.hpp"
 #include <utils/io.hpp>
+#include <utils/circular_buffer.hpp>
 
 static inline void outb(uint16_t port, uint8_t value) {
     __asm__ volatile ("outb %0, %1" : : "a"(value), "Nd"(port));
@@ -18,7 +19,7 @@ static inline uint8_t inb(uint16_t port) {
     return ret;
 }
 
-// Scancode set 1 → ASCII mapping (simplified, moved outside namespace for extern "C" access)
+// Scancode set 1 → ASCII mapping (lowercase)
 static const char keyboard_scancode_map[128] = {
     0, 0, '1','2','3','4','5','6','7','8','9','0','-','=','\b',
     '\t','q','w','e','r','t','y','u','i','o','p','[',']','\n',
@@ -27,10 +28,23 @@ static const char keyboard_scancode_map[128] = {
     '*',0,' '
 };
 
+// Scancode set 1 → ASCII mapping (uppercase - with shift)
+static const char keyboard_scancode_map_shift[128] = {
+    0, 0, '!','@','#','$','%','^','&','*','(',')','_','+','\b',
+    '\t','Q','W','E','R','T','Y','U','I','O','P','{','}','\n',
+    0,'A','S','D','F','G','H','J','K','L',':','"','~',
+    0,'|','Z','X','C','V','B','N','M','<','>','?',0,
+    '*',0,' '
+};
+
 namespace Keyboard {
 
-    // Reference to module-level map
-    static const char* scancode_map = keyboard_scancode_map;
+    // Input buffer for CLI mode
+    static Utils::CircularBuffer<char, 512> input_buffer;
+    static bool shift_pressed = false;
+    static bool ctrl_pressed = false;
+    static bool alt_pressed = false;
+    static bool extended_code = false; // For 0xE0 prefixed keys
 
     void init() {
         // Flush keyboard buffer
@@ -38,30 +52,128 @@ namespace Keyboard {
     }
 
     bool has_input() {
-        return (inb(0x64) & 0x01) != 0;
+        return !input_buffer.is_empty();
+    }
+
+    bool try_read(char& c) {
+        return input_buffer.pop(c);
     }
 
     char get_char() {
-        while (!has_input());
-        uint8_t scancode = inb(0x60);
-        if (scancode & 0x80) return 0; // key release, skip
-        if (scancode < 128) return scancode_map[scancode];
-        return 0;
+        // Blocking read
+        while (!has_input()) {
+            __asm__ volatile("hlt");
+        }
+        char c;
+        input_buffer.pop(c);
+        return c;
+    }
+
+    void put_buffer(char c) {
+        input_buffer.push(c);
+    }
+
+    bool is_shift_held() {
+        return shift_pressed;
+    }
+
+    bool is_ctrl_held() {
+        return ctrl_pressed;
     }
 
 }
 
 // External C handler for assembly interrupt dispatcher
 extern "C" void keyboard_handler_main() {
-    // Read scan code from port 0x60
-    uint8_t scancode = IO::inb(0x60);
+    using namespace Keyboard;
     
-    // Only process key press events (bit 7 = 0)
-    if (!(scancode & 0x80) && scancode < 128) {
-        char c = keyboard_scancode_map[scancode];
+    uint8_t scancode = inb(0x60);
+    
+    // Handle extended scancodes (arrow keys, etc)
+    if (scancode == 0xE0) {
+        extended_code = true;
+        return;
+    }
+    
+    // Arrow keys and extended keys (0xE0 prefix)
+    if (extended_code) {
+        extended_code = false;
+        
+        if (!(scancode & 0x80)) { // Key press
+            switch (scancode) {
+                case 0x48: // Up arrow
+                    Keyboard::put_buffer((char)KeyCode::KEY_UP);
+                    Serial::write_char('^');
+                    return;
+                case 0x50: // Down arrow
+                    Keyboard::put_buffer((char)KeyCode::KEY_DOWN);
+                    Serial::write_char('v');
+                    return;
+                case 0x4B: // Left arrow
+                    Keyboard::put_buffer((char)KeyCode::KEY_LEFT);
+                    Serial::write_char('<');
+                    return;
+                case 0x4D: // Right arrow
+                    Keyboard::put_buffer((char)KeyCode::KEY_RIGHT);
+                    Serial::write_char('>');
+                    return;
+                case 0x47: // Home
+                    Keyboard::put_buffer((char)KeyCode::KEY_HOME);
+                    return;
+                case 0x4F: // End
+                    Keyboard::put_buffer((char)KeyCode::KEY_END);
+                    return;
+                case 0x53: // Delete
+                    Keyboard::put_buffer((char)KeyCode::KEY_DELETE);
+                    Serial::write_char('-');
+                    return;
+            }
+        } else { // Key release
+            // Skip key release for extended keys
+            return;
+        }
+    }
+    
+    // Regular keys
+    if (scancode & 0x80) {
+        // Key release
+        uint8_t key = scancode & 0x7F;
+        if (key == 0x2A || key == 0x36) {  // Shift release
+            shift_pressed = false;
+        } else if (key == 0x1D) {          // Ctrl release
+            ctrl_pressed = false;
+        }
+        return;
+    }
+    
+    // Key press
+    if (scancode == 0x2A || scancode == 0x36) {  // Shift press
+        shift_pressed = true;
+        return;
+    }
+    
+    if (scancode == 0x1D) {  // Ctrl press
+        ctrl_pressed = true;
+        return;
+    }
+    
+    if (scancode == 0x38) {  // Alt press
+        alt_pressed = true;
+        return;
+    }
+    
+    if (scancode < 128) {
+        // Get character from appropriate map
+        char c = shift_pressed ? keyboard_scancode_map_shift[scancode] : keyboard_scancode_map[scancode];
+        
         if (c != 0) {
-            // Echo character to serial
-            Serial::write_char(c);
+            Keyboard::put_buffer(c);
+            
+            // Echo to serial for feedback (but not arrow keys already echoed)
+            if (c != (char)KeyCode::KEY_UP && c != (char)KeyCode::KEY_DOWN && 
+                c != (char)KeyCode::KEY_LEFT && c != (char)KeyCode::KEY_RIGHT) {
+                Serial::write_char(c);
+            }
         }
     }
 }
