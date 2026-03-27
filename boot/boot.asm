@@ -17,6 +17,8 @@ align 4096
 p4_table: resb 4096
 p3_table: resb 4096
 p2_table: resb 4096
+
+align 16                        ; Stack harus 16-byte aligned
 stack_bottom: resb 16384
 stack_top:
 
@@ -95,6 +97,12 @@ long_mode_start:
     mov fs, ax
     mov gs, ax
 
+    ; Setup stack pointer (harus 16-byte aligned)
+    mov rsp, stack_top
+    
+    ; Align stack ke 16 bytes (System V AMD64 ABI requirement)
+    and rsp, -16
+    
     ; Panggil kernel utama dengan argumen multiboot
     mov edi, edi                ; EDI masih pegang magic (32-bit ke 64-bit)
     mov rsi, rsi                ; RSI masih pegang pointer

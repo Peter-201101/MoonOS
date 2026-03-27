@@ -3,10 +3,14 @@
 
 global gdt_flush
 global idt_flush
-global irq1_handler           ; Tambahkan ini agar bisa dipanggil di idt.cpp
-extern keyboard_handler_main  ; Fungsi C++ yang akan kita panggil
+global irq1_handler
+global default_isr_handler    ; <--- TAMBAHKAN INI
 
-; Flush GDT dan reload segment registers
+extern keyboard_handler_main
+
+section .text
+
+; --- Flush GDT ---
 gdt_flush:
     lgdt [rdi]              
     mov ax, 0x10            
@@ -22,14 +26,24 @@ gdt_flush:
 .done:
     ret
 
-; Flush IDT
+; --- Flush IDT ---
 idt_flush:
     lidt [rdi]
     ret
 
-; --- Handler untuk Keyboard (IRQ 1) ---
+; --- Default Handler (Pengaman) ---
+default_isr_handler:
+    push rax
+    ; Kirim EOI ke PIC (End of Interrupt) agar PIC tidak nge-hang
+    mov al, 0x20
+    out 0x20, al
+    out 0xA0, al
+    pop rax
+    iretq
+
+; --- Handler Keyboard (IRQ 1) ---
 irq1_handler:
-    ; 1. Simpan register agar tidak rusak saat balik ke kernel_main
+    ; 1. Simpan register lengkap (64-bit)
     push rax
     push rcx
     push rdx
@@ -40,11 +54,10 @@ irq1_handler:
     push r10
     push r11
 
-    ; 2. Panggil logika C++
+    ; 2. Panggil C++
     call keyboard_handler_main
 
-    ; 3. Beritahu PIC kalau interupsi sudah selesai (EOI - End of Interrupt)
-    ; Jika tidak dikirim, keyboard hanya akan berfungsi sekali saja.
+    ; 3. Kirim EOI ke PIC Master (Port 0x20)
     mov al, 0x20
     out 0x20, al
 
@@ -59,5 +72,4 @@ irq1_handler:
     pop rcx
     pop rax
     
-    ; 5. Return khusus interupsi (Interrupt Return 64-bit)
     iretq

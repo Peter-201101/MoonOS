@@ -1,120 +1,64 @@
 #include "kernel.hpp"
 #include <drivers/serial.hpp>
-#include <drivers/keyboard.hpp>
 #include <arch/x86_64/gdt.hpp>
 #include <arch/x86_64/idt.hpp>
 #include <memory/pmm.hpp>
 #include <memory/vmm.hpp>
 #include <utils/io.hpp>
+#include <utils/string.hpp>
+#include <fs/fs.hpp>
+#include <drivers/disk/ata.hpp>
 #include <system/setup/setup.hpp>
 #include <system/login/login.hpp>
 #include <system/config/config.hpp>
-#include <fs/fs.hpp>
-#include <drivers/disk/ata.hpp>
-
-static bool is_first_boot = true;
+#include <drivers/serial.hpp>
 
 extern "C" void kernel_main(uint32_t magic, uint64_t multiboot_addr) {
-    (void)multiboot_addr;
-
-    // =============================
-    // INIT SERIAL
-    // =============================
+    __asm__ volatile("cli"); // Matikan interupsi dulu biar stabil
+    
     Serial::init();
-    Serial::writeln("==========================================");
-    Serial::writeln("  MoonOS Booting (Codespaces Mode)");
-    Serial::writeln("==========================================");
-
-    // =============================
-    // MULTIBOOT CHECK
-    // =============================
-    if (magic != MULTIBOOT2_MAGIC) goto halt;
-
-    // =============================
-    // ARCH INIT
-    // =============================
     GDT::init();
     IDT::init();
-
-    // Disable interrupt sementara (pakai polling)
-    __asm__ volatile ("cli");
-
-    // =============================
-    // SYSTEM INIT
-    // =============================
-    PMM::init(0x1000000, MB(112));
+    PMM::init(0x1000000, 112 * 1024 * 1024);
     VMM::init();
-    Keyboard::init();
-    FS::init();
-    Config::init();
 
-    // =============================
-    // SETUP & LOGIN
-    // =============================
-    if (is_first_boot) {
+    // 1. Siapkan Hardware & Data
+    ATA::init();
+    FS::init();
+    Config::init(); // Cek LBA 1
+
+    // 2. Cek apakah harus Setup atau langsung Login
+    if (Config::get()->username[0] == '\0') {
         run_setup();
-        is_first_boot = false;
+    } else {
+        Serial::write("[SYSTEM] Welcome back, ");
+        Serial::writeln(Config::get()->username);
     }
 
     run_login();
 
-    // =============================
-    // ATA TEST (WAJIB DI SINI)
-    // =============================
-    ATA::init();
-
-    uint8_t buffer[512];
-
-    // isi data
-    for (int i = 0; i < 512; i++) buffer[i] = 'X';
-
-    // WRITE
-    if (ATA::write_sector(1, buffer)) {
-        Serial::writeln("[TEST] Write OK");
-    } else {
-        Serial::writeln("[TEST] Write FAIL");
-    }
-
-    // clear buffer
-    for (int i = 0; i < 512; i++) buffer[i] = 0;
-
-    // READ
-    if (ATA::read_sector(1, buffer)) {
-        Serial::write("[TEST] Read: ");
-        for (int i = 0; i < 16; i++) {
-            Serial::write_char(buffer[i]);
-        }
-        Serial::write("\n");
-    } else {
-        Serial::writeln("[TEST] Read FAIL");
-    }
-
-    // =============================
-    // SHELL START
-    // =============================
-    Serial::writeln("\n==========================================");
-    Serial::writeln("  MoonOS Shell Active");
-    Serial::writeln("==========================================");
-
-    // =============================
-    // MAIN LOOP (TERAKHIR!)
-    // =============================
+    // 3. Shell Mode
+    Serial::writeln("\n[MOON-SHELL] Type 'help' for commands.");
+    Serial::write("> ");
+    
+    char cmd[128];
+    int idx = 0;
     while (true) {
         if (IO::inb(0x3F8 + 5) & 0x01) {
             char c = (char)IO::inb(0x3F8);
-
             if (c == '\r') {
                 Serial::write("\r\n");
+                cmd[idx] = '\0';
+                if (String::compare(cmd, "ls") == 0) FS::list_files();
+                else if (String::compare(cmd, "format") == 0) FS::format();
+                else if (String::compare(cmd, "clear") == 0) Serial::write("\033[2J\033[H");
+                else if (idx > 0) Serial::writeln("Unknown Command.");
+                idx = 0; Serial::write("> ");
             } else if (c == '\b' || c == '\x7f') {
-                Serial::write("\b \b");
-            } else if (c >= 0x20) {
-                Serial::write_char(c);
+                if (idx > 0) { idx--; Serial::write("\b \b"); }
+            } else if (idx < 127 && c >= 32) {
+                cmd[idx++] = c; Serial::write_char(c);
             }
         }
-
-        __asm__ volatile ("pause");
     }
-
-halt:
-    __asm__ volatile ("cli; hlt");
 }

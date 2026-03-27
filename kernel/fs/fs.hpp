@@ -1,21 +1,26 @@
 #pragma once
+#include <types.hpp>
 
-#define MAX_FILES 32
-#define MAX_FILE_SIZE 256
-
-struct File {
-    char name[32];
-    char data[MAX_FILE_SIZE];
-    int size;
-    bool used;
-};
+#define MOONFS_MAGIC 0x4D4F4F4E // "MOON"
+#define MAX_FILES 16
 
 namespace FS {
+    struct FileEntry {
+        char     name[32];
+        uint32_t start_lba;
+        uint32_t size_sectors;
+        uint8_t  type; // 0: Data, 1: Executable
+        uint8_t  present;
+    };
+
+    struct Superblock {
+        uint32_t magic;
+        uint32_t file_count;
+        FileEntry files[MAX_FILES];
+    };
+
     void init();
-
-    bool create(const char* name);
-    bool write(const char* name, const char* data);
-    const char* read(const char* name);
-
-    void list();
+    bool list_files();
+    void format();
+    bool load_and_run(const char* name);
 }

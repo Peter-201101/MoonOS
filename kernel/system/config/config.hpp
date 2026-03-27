@@ -12,4 +12,5 @@ namespace Config {
     void init();
     SystemConfig* get();
     void set(const SystemConfig& cfg);
+    void save_to_disk();
 }

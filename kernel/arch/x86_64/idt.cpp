@@ -1,22 +1,22 @@
 #include "idt.hpp"
 #include <drivers/serial.hpp>
-#include <utils/io.hpp> // Pastikan ada outb/inb di sini
+#include <utils/io.hpp>
 
 static IDT::Entry idt_entries[256];
 static IDT::Descriptor idt_descriptor;
 
-extern "C" void idt_flush(uint64_t descriptor_ptr);
-extern "C" void irq1_handler(); // Handler dari assembly
+extern "C" void idt_flush(uintptr_t descriptor_ptr);
+extern "C" void irq1_handler();
+extern "C" void default_isr_handler(); // Linker sekarang akan menemukan ini di isr.asm
 
-// PIC Remapping: Menggeser IRQ hardware agar tidak bentrok dengan Exception CPU
 void pic_remap() {
-    IO::outb(0x20, 0x11); IO::outb(0xA0, 0x11); // ICW1: Inisialisasi
-    IO::outb(0x21, 0x20); IO::outb(0xA1, 0x28); // ICW2: Offset (IRQ0-7 -> 32-39)
-    IO::outb(0x21, 0x04); IO::outb(0xA1, 0x02); // ICW3: Cascade
-    IO::outb(0x21, 0x01); IO::outb(0xA1, 0x01); // ICW4: 8086 Mode
+    IO::outb(0x20, 0x11); IO::outb(0xA0, 0x11);
+    IO::outb(0x21, 0x20); IO::outb(0xA1, 0x28); // Map IRQ 0-15 ke 32-47
+    IO::outb(0x21, 0x04); IO::outb(0xA1, 0x02);
+    IO::outb(0x21, 0x01); IO::outb(0xA1, 0x01);
     
-    // Masking: 0xFD aktifkan IRQ1 (Keyboard), 0xFF matikan sisanya
-    IO::outb(0x21, 0xFD); 
+    // Masking: Aktifkan hanya Keyboard (IRQ1)
+    IO::outb(0x21, 0xFD); // 0xFD = 11111101 (bit 1 aktif)
     IO::outb(0xA1, 0xFF);
 }
 
@@ -35,19 +35,17 @@ namespace IDT {
         idt_descriptor.size   = (sizeof(Entry) * 256) - 1;
         idt_descriptor.offset = (uintptr_t)&idt_entries;
 
-        // 1. Remap PIC dulu
         pic_remap();
 
-        // 2. Set default handler untuk semua
+        // 1. Semua isi dengan default_isr_handler agar tidak crash jika ada error
         for (int i = 0; i < 256; i++) {
-            set_gate(i, 0, 0x08, 0x8E); // Placeholder
+            set_gate(i, (uint64_t)default_isr_handler, 0x08, 0x8E);
         }
 
-        // 3. Daftarkan Handler Keyboard (IRQ 1 = Int 33)
+        // 2. Override IRQ 1 (Keyboard) ke handler aslinya
         set_gate(33, (uint64_t)irq1_handler, 0x08, 0x8E);
 
         idt_flush((uintptr_t)&idt_descriptor);
-        __asm__ volatile ("sti"); // Nyalakan Interupsi!
-        Serial::writeln("[IDT] Initialized & Interrupts Enabled");
+        // STI dilakukan di kernel_main setelah login/setup selesai
     }
 }

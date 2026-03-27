@@ -1,97 +1,39 @@
 #include "fs.hpp"
+#include <drivers/disk/ata.hpp>
 #include <drivers/serial.hpp>
+#include <utils/string.hpp>
 
-// ==============================
-// Internal Storage
-// ==============================
-static File files[MAX_FILES];
+static FS::Superblock sblock;
 
-// ==============================
-// Helpers
-// ==============================
-static bool str_eq(const char* a, const char* b) {
-    int i = 0;
-    while (a[i] && b[i]) {
-        if (a[i] != b[i]) return false;
-        i++;
-    }
-    return a[i] == b[i];
-}
-
-static void str_copy(char* dst, const char* src, int max) {
-    int i = 0;
-    for (; i < max - 1 && src[i]; i++) {
-        dst[i] = src[i];
-    }
-    dst[i] = '\0';
-}
-
-// ==============================
-// Init
-// ==============================
 void FS::init() {
-    for (int i = 0; i < MAX_FILES; i++) {
-        files[i].used = false;
+    uint8_t temp[1024]; // Buffer untuk 2 sektor
+    if (ATA::read_sector(2, temp) && ATA::read_sector(3, temp + 512)) {
+        String::memcpy(&sblock, temp, sizeof(FS::Superblock));
+        if (sblock.magic == MOONFS_MAGIC) Serial::writeln("[FS] MoonFS Mounted.");
+        else Serial::writeln("[FS] Magic Mismatch! Need Format.");
     }
 }
 
-// ==============================
-// Create File
-// ==============================
-bool FS::create(const char* name) {
-    for (int i = 0; i < MAX_FILES; i++) {
-        if (!files[i].used) {
-            str_copy(files[i].name, name, 32);
-            files[i].size = 0;
-            files[i].used = true;
-            return true;
-        }
+void FS::format() {
+    String::memset(&sblock, 0, sizeof(FS::Superblock));
+    sblock.magic = MOONFS_MAGIC;
+    sblock.file_count = 0;
+    
+    uint8_t* p = (uint8_t*)&sblock;
+    if (ATA::write_sector(2, p) && ATA::write_sector(3, p + 512)) {
+        Serial::writeln("[FS] Disk Formatted Successfully.");
     }
-    return false;
 }
 
-// ==============================
-// Write File
-// ==============================
-bool FS::write(const char* name, const char* data) {
+bool FS::list_files() {
+    Serial::writeln("\n--- File List ---");
+    int found = 0;
     for (int i = 0; i < MAX_FILES; i++) {
-        if (files[i].used && str_eq(files[i].name, name)) {
-
-            int j = 0;
-            for (; j < MAX_FILE_SIZE - 1 && data[j]; j++) {
-                files[i].data[j] = data[j];
-            }
-
-            files[i].data[j] = '\0';
-            files[i].size = j;
-            return true;
+        if (sblock.files[i].present) {
+            Serial::write("- "); Serial::writeln(sblock.files[i].name);
+            found++;
         }
     }
-    return false;
-}
-
-// ==============================
-// Read File
-// ==============================
-const char* FS::read(const char* name) {
-    for (int i = 0; i < MAX_FILES; i++) {
-        if (files[i].used && str_eq(files[i].name, name)) {
-            return files[i].data;
-        }
-    }
-    return nullptr;
-}
-
-// ==============================
-// List Files
-// ==============================
-void FS::list() {
-    Serial::writeln("Files:");
-
-    for (int i = 0; i < MAX_FILES; i++) {
-        if (files[i].used) {
-            Serial::write("- ");
-            Serial::writeln(files[i].name);
-        }
-    }
+    if (found == 0) Serial::writeln("(Empty)");
+    return true;
 }

@@ -20,15 +20,25 @@ CXXFLAGS := \
     -O2                  \
     -Wall                \
     -Wextra              \
+    -mno-sse             \
+    -mno-sse2            \
+    -mno-mmx             \
+    -mno-80387           \
+    -mno-avx             \
+    -fno-pic             \
+    -mcmodel=kernel      \
+    -mstackrealign       \
+    -minline-all-stringops \
     -Iinclude            \
     -Ikernel
 
 ASMFLAGS := -f elf64
 
 LDFLAGS  := \
-    -T linker/linker.ld  \
-    -nostdlib            \
-    -z noexecstack
+    -T linker/linker.ld  	\
+    -nostdlib            	\
+    -z noexecstack       	\
+	-z max-page-size=0x1000
 
 # ── Source & Object Files ──
 CXX_SRCS := $(shell find kernel -name "*.cpp")

@@ -26,6 +26,12 @@ static inline bool bitmap_test(size_t idx) {
 namespace PMM {
 
     void init(uint64_t mem_start, uint64_t mem_size) {
+        // Ensure memory_start is properly aligned
+        if (mem_start % PAGE_SIZE != 0) {
+            Serial::writeln("[PMM] ERROR: Memory start not page-aligned!");
+            return;
+        }
+        
         n_frames   = mem_size / PAGE_SIZE;
         total_mem  = mem_size;
         bitmap     = (uint8_t*)mem_start;
@@ -45,7 +51,9 @@ namespace PMM {
 
         Serial::write("[PMM] Initialized: ");
         Serial::write_dec(n_frames);
-        Serial::writeln(" frames");
+        Serial::write(" frames at 0x");
+        Serial::write_hex(mem_start);
+        Serial::writeln("");
     }
 
     void* alloc_frame() {

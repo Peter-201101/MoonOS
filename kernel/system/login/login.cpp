@@ -1,34 +1,16 @@
 #include "login.hpp"
 #include <drivers/serial.hpp>
-#include <utils/io.hpp>
 #include <system/config/config.hpp>
 
-static void input_field(const char* label, char* buf, int max, bool hidden = false) {
-    Serial::write(label);
-    int idx = 0;
-    while (true) {
-        if (IO::inb(0x3F8 + 5) & 0x01) {
-            char c = (char)IO::inb(0x3F8);
-            if (c == '\r' || c == '\n') {
-                buf[idx] = '\0';
-                Serial::write("\r\n");
-                return;
-            }
-            if ((c == '\b' || c == '\x7f') && idx > 0) {
-                idx--; Serial::write("\b \b");
-            }
-            else if (c >= 0x20 && idx < max - 1) {
-                buf[idx++] = c;
-                Serial::write_char(hidden ? '*' : c);
-            }
-        }
-    }
-}
+// Declaration for input_field function
+void input_field(const char* prompt, char* buffer, int max_length, bool is_password = false);
 
 static bool str_eq(const char* a, const char* b) {
-    for (int i = 0; i < 32; i++) {
+    int i = 0;
+    while (a[i] != '\0' || b[i] != '\0') {
         if (a[i] != b[i]) return false;
-        if (a[i] == '\0') return true;
+        i++;
+        if (i >= 32) break;
     }
     return true;
 }
@@ -36,9 +18,10 @@ static bool str_eq(const char* a, const char* b) {
 void run_login() {
     auto cfg = Config::get();
     char user[32], pass[32];
-
+    
     while (true) {
         Serial::writeln("\n=== MoonOS Login ===");
+        // Gunakan input_field yang sudah ada di kode kamu sebelumnya
         input_field("Username : ", user, 32);
         input_field("Password : ", pass, 32, true);
 
@@ -47,6 +30,6 @@ void run_login() {
             Serial::writeln(cfg->username);
             return;
         }
-        Serial::writeln("\n[Login Failed] Try again.");
+        Serial::writeln("\n[Login Failed] Incorrect credentials.");
     }
 }
