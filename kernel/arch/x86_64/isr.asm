@@ -13,13 +13,13 @@ section .text
 ; --- Flush GDT ---
 gdt_flush:
     lgdt [rdi]              
-    mov ax, 0x10            
+    mov ax, 0x10            ; Data segment selector (offset 2 * 8 bytes = 16)
     mov ds, ax
     mov es, ax
     mov fs, ax
     mov gs, ax
     mov ss, ax
-    push 0x08               
+    push 0x08               ; Code segment selector (offset 1 * 8 bytes = 8)
     lea rax, [rel .done]
     push rax
     retfq
@@ -31,14 +31,24 @@ idt_flush:
     lidt [rdi]
     ret
 
-; --- Default Handler (Pengaman) ---
+; --- Default Handler (Exception/Fault Catcher) ---
+; This handler is called for ALL unhandled exceptions and interrupts
+; It must be careful not to cause another fault
 default_isr_handler:
     push rax
-    ; Kirim EOI ke PIC (End of Interrupt) agar PIC tidak nge-hang
+    push rcx
+    push rdx
+    
+    ; Send EOI to both PIC controllers (master and slave)
+    ; This is safe even for non-PIC interrupts
     mov al, 0x20
-    out 0x20, al
-    out 0xA0, al
+    out 0x20, al    ; Master PIC
+    out 0xA0, al    ; Slave PIC (redundant but safe)
+    
+    pop rdx
+    pop rcx
     pop rax
+    
     iretq
 
 ; --- Handler Keyboard (IRQ 1) ---

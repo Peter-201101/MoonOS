@@ -31,46 +31,113 @@ static bool wait_drq() {
 }
 
 void ATA::init() {
-    IO::outb(ATA_DRIVE, 0xA0); // Pilih Master Drive
+    // Disable interrupts during ATA init
+    __asm__ volatile("cli");
+    
+    // Pilih Master Drive LBA mode
+    IO::outb(ATA_DRIVE, 0xE0); 
+    
+    // Give drive time to respond
     ata_delay();
+    ata_delay();
+    
     uint8_t status = IO::inb(ATA_STATUS);
-    if (status == 0xFF) Serial::writeln("[ATA] Error: No Drive.");
-    else Serial::writeln("[ATA] Drive Ready.");
+    
+    if (status == 0xFF) {
+        Serial::writeln("[ATA] Error: No drive detected or invalid signature");
+        return;
+    }
+    
+    if (status & 0x80) {
+        Serial::writeln("[ATA] Warning: Drive still busy after init");
+    }
+    
+    Serial::writeln("[ATA] Drive initialized successfully");
 }
 
 bool ATA::read_sector(uint32_t lba, uint8_t* buffer) {
+    if (buffer == nullptr) {
+        Serial::writeln("[ATA] Error: NULL buffer pointer");
+        return false;
+    }
+    
+    // Disable interrupts during ATA operation
+    uint64_t rflags;
+    __asm__ volatile("pushfq; popq %0" : "=r"(rflags));
+    __asm__ volatile("cli");
+    
     wait_bsy();
+    
+    // Setup LBA addressing
     IO::outb(ATA_DRIVE, 0xE0 | ((lba >> 24) & 0x0F));
     IO::outb(ATA_SECCOUNT, 1);
     IO::outb(ATA_LBA_LOW,  (uint8_t)lba);
     IO::outb(ATA_LBA_MID,  (uint8_t)(lba >> 8));
     IO::outb(ATA_LBA_HIGH, (uint8_t)(lba >> 16));
     IO::outb(ATA_COMMAND, 0x20); // READ_PIO
+    
     ata_delay();
-    if (!wait_drq()) return false;
-    for (int i = 0; i < 256; i++) {
-        uint16_t data = IO::inw(ATA_DATA);
-        buffer[i * 2] = data & 0xFF;
-        buffer[i * 2 + 1] = data >> 8;
+    
+    bool success = false;
+    if (wait_drq()) {
+        // Read 256 words (512 bytes)
+        for (int i = 0; i < 256; i++) {
+            uint16_t data = IO::inw(ATA_DATA);
+            buffer[i * 2] = data & 0xFF;
+            buffer[i * 2 + 1] = data >> 8;
+        }
+        success = true;
+    } else {
+        Serial::writeln("[ATA] Error: Read timeout or error status");
     }
-    return true;
+    
+    // Restore flags
+    if (rflags & 0x200) __asm__ volatile("sti");
+    
+    return success;
 }
 
 bool ATA::write_sector(uint32_t lba, const uint8_t* buffer) {
+    if (buffer == nullptr) {
+        Serial::writeln("[ATA] Error: NULL buffer pointer");
+        return false;
+    }
+    
+    // Disable interrupts during ATA operation
+    uint64_t rflags;
+    __asm__ volatile("pushfq; popq %0" : "=r"(rflags));
+    __asm__ volatile("cli");
+    
     wait_bsy();
+    
+    // Setup LBA addressing
     IO::outb(ATA_DRIVE, 0xE0 | ((lba >> 24) & 0x0F));
     IO::outb(ATA_SECCOUNT, 1);
     IO::outb(ATA_LBA_LOW,  (uint8_t)lba);
     IO::outb(ATA_LBA_MID,  (uint8_t)(lba >> 8));
     IO::outb(ATA_LBA_HIGH, (uint8_t)(lba >> 16));
     IO::outb(ATA_COMMAND, 0x30); // WRITE_PIO
+    
     ata_delay();
-    if (!wait_drq()) return false;
-    for (int i = 0; i < 256; i++) {
-        uint16_t data = buffer[i * 2] | (buffer[i * 2 + 1] << 8);
-        IO::outw(ATA_DATA, data);
+    
+    bool success = false;
+    if (wait_drq()) {
+        // Write 256 words (512 bytes)
+        for (int i = 0; i < 256; i++) {
+            uint16_t data = buffer[i * 2] | (buffer[i * 2 + 1] << 8);
+            IO::outw(ATA_DATA, data);
+        }
+        
+        // Flush cache
+        IO::outb(ATA_COMMAND, 0xE7);
+        wait_bsy();
+        success = true;
+    } else {
+        Serial::writeln("[ATA] Error: Write timeout or error status");
     }
-    IO::outb(ATA_COMMAND, 0xE7); // FLUSH
-    wait_bsy();
-    return true;
+    
+    // Restore flags
+    if (rflags & 0x200) __asm__ volatile("sti");
+    
+    return success;
 }

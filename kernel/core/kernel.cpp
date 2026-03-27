@@ -14,30 +14,56 @@
 #include <drivers/serial.hpp>
 
 extern "C" void kernel_main(uint32_t magic, uint64_t multiboot_addr) {
-    __asm__ volatile("cli"); // Matikan interupsi dulu biar stabil
+    __asm__ volatile("cli"); // Disable interrupts during initialization
     
+    // Initialize core systems first - these must succeed or we halt
     Serial::init();
+    Serial::writeln("[KERNEL] MoonOS x86_64 Bootloader...");
+    
+    // Setup CPU tables (GDT & IDT)
     GDT::init();
+    Serial::writeln("[GDT] Global Descriptor Table loaded");
+    
     IDT::init();
+    Serial::writeln("[IDT] Interrupt Descriptor Table loaded");
+    
+    // Memory management
     PMM::init(0x1000000, 112 * 1024 * 1024);
+    Serial::writeln("[PMM] Physical Memory Manager initialized");
+    
     VMM::init();
+    Serial::writeln("[VMM] Virtual Memory Manager initialized");
 
-    // 1. Siapkan Hardware & Data
+    // Hardware & Storage initialization
+    Serial::writeln("[INIT] Initializing hardware...");
+    
     ATA::init();
+    Serial::writeln("[ATA] Disk controller initialized");
+    
     FS::init();
-    Config::init(); // Cek LBA 1
+    Serial::writeln("[FS] Filesystem ready");
+    
+    // Load configuration from disk
+    Config::init();
+    Serial::writeln("[CONFIG] Configuration loaded");
 
-    // 2. Cek apakah harus Setup atau langsung Login
-    if (Config::get()->username[0] == '\0') {
+    // System setup or login
+    SystemConfig* cfg = Config::get();
+    if (cfg == nullptr || cfg->username[0] == '\0' || cfg->username[0] == (char)0xFF) {
+        Serial::writeln("[SYSTEM] First boot detected - starting setup");
         run_setup();
     } else {
         Serial::write("[SYSTEM] Welcome back, ");
-        Serial::writeln(Config::get()->username);
+        Serial::writeln(cfg->username);
     }
 
+    Serial::writeln("[SYSTEM] Starting login sequence...");
     run_login();
 
-    // 3. Shell Mode
+    // Enable interrupts for shell mode
+    __asm__ volatile("sti");
+    
+    // Shell Mode
     Serial::writeln("\n[MOON-SHELL] Type 'help' for commands.");
     Serial::write("> ");
     

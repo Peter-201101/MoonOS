@@ -103,9 +103,18 @@ long_mode_start:
     ; Align stack ke 16 bytes (System V AMD64 ABI requirement)
     and rsp, -16
     
+    ; Load data segment
+    mov ax, gdt64.data
+    mov ss, ax
+    mov ds, ax
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
+    
     ; Panggil kernel utama dengan argumen multiboot
-    mov edi, edi                ; EDI masih pegang magic (32-bit ke 64-bit)
-    mov rsi, rsi                ; RSI masih pegang pointer
+    ; EDI dan ESI sudah berisi magic dan pointer dari _start
+    ; (Multiboot loader set EAX dan EBX, kita save ke EDI/ESI di _start)
+    ; Dalam 64-bit, mov edi, edi akan zero-extend ke RDI
     call kernel_main
 
     cli
@@ -117,7 +126,9 @@ section .rodata
 gdt64:
     dq 0 ; zero entry
 .code: equ $ - gdt64
-    dq (1<<43) | (1<<44) | (1<<47) | (1<<53) ; code segment
+    dq (1<<44) | (1<<47) | (1<<53) | (1<<41) | (1<<40) | (1<<54) | (1<<55) | (1<<43) ; code segment 64-bit: P, S, L, R, A, E
+.data: equ $ - gdt64
+    dq (1<<44) | (1<<47) | (1<<41) | (1<<54) | (1<<55) ; data segment
 .pointer:
     dw $ - gdt64 - 1
     dq gdt64
