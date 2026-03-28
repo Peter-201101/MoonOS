@@ -1,7 +1,7 @@
 #include "fs.hpp"
-#include <drivers/disk/ata.hpp>
-#include <drivers/serial.hpp>
-#include <utils/string.hpp>
+#include <storage/ata.hpp>
+#include <io/serial.hpp>
+#include <string.hpp>
 
 static FS::Superblock sblock;
 static uint32_t current_dir_inode = 0;  // Root dir inode
@@ -45,6 +45,32 @@ void FS::format() {
     }
 }
 
+bool FS::mkdir_root() {
+    // Create root directory entry after format
+    String::memset(&sblock.files[0], 0, sizeof(FileEntry));
+    sblock.files[0].inode = next_inode++;
+    String::memcpy(sblock.files[0].name, "/", 2);
+    sblock.files[0].type = FileType::TYPE_DIR;
+    sblock.files[0].present = 1;
+    sblock.files[0].parent_inode = 0;  // Root is its own parent
+    sblock.file_count = 1;
+    
+    // Save to disk immediately
+    uint8_t* p = (uint8_t*)&sblock;
+    if (ATA::write_sector(2, p) && ATA::write_sector(3, p + 512)) {
+        Serial::writeln("[FS] Root directory created");
+        return true;
+    }
+    return false;
+}
+
+// Internal: Save filesystem state to disk
+static void save_filesystem_to_disk() {
+    uint8_t* p = (uint8_t*)&sblock;
+    ATA::write_sector(2, p);
+    ATA::write_sector(3, p + 512);
+}
+
 bool FS::list_files() {
     Serial::writeln("\n--- File List ---");
     int found = 0;
@@ -53,7 +79,9 @@ bool FS::list_files() {
         if (sblock.files[i].present && sblock.files[i].parent_inode == current_dir_inode) {
             Serial::write(sblock.files[i].name);
             
-            if (sblock.files[i].type == FileType::TYPE_DIR) {
+            // Add "/" suffix for directories, but skip if name already ends with /
+            if (sblock.files[i].type == FileType::TYPE_DIR && 
+                (sblock.files[i].name[0] != '/' || sblock.files[i].name[1] != '\0')) {
                 Serial::write("/");
             }
             Serial::write(" (");
@@ -99,6 +127,7 @@ bool FS::mkdir(const char* dirname) {
             
             Serial::write("[FS] Directory created: ");
             Serial::writeln(dirname);
+            save_filesystem_to_disk();
             return true;
         }
     }
@@ -190,6 +219,7 @@ bool FS::touch(const char* filename) {
             
             Serial::write("[FS] File created: ");
             Serial::writeln(filename);
+            save_filesystem_to_disk();
             return true;
         }
     }
@@ -255,6 +285,7 @@ bool FS::rm(const char* filename) {
             
             Serial::write("[FS] Deleted: ");
             Serial::writeln(filename);
+            save_filesystem_to_disk();
             return true;
         }
     }

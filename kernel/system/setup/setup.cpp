@@ -1,9 +1,10 @@
 #include "setup.hpp"
-#include <drivers/serial.hpp>
+#include <io/serial.hpp>
 #include <system/config/config.hpp>
-#include <utils/string.hpp>
-#include <utils/io.hpp>
-#include <drivers/disk/ata.hpp>
+#include <string.hpp>
+#include <io.hpp>
+#include <storage/ata.hpp>
+#include <storage/fs.hpp>
 
 // Hapus 'static' agar bisa dipanggil login.cpp
 void input_field(const char* label, char* buf, int max, bool hidden) {
@@ -16,7 +17,7 @@ void input_field(const char* label, char* buf, int max, bool hidden) {
         if (status & 0x01) {  // Data available
             char c = (char)IO::inb(0x3F8);
             
-            // Handle backspace
+            // Handle backspace (both 0x08 '\b' and 0x7F DEL)
             if ((c == '\b' || c == 0x7F) && idx > 0) {
                 idx--;
                 Serial::write("\b \b");
@@ -53,7 +54,15 @@ void run_setup() {
     String::memcpy(cfg->hostname, h, 32);
     String::memcpy(cfg->timezone, t, 32);
 
+    // Format filesystem and create root directory
+    FS::format();
+    Serial::writeln("[SETUP] Filesystem formatted");
+    
+    // Create root directory entry
+    FS::mkdir_root();
+    
     // SIMPAN PERMANEN
     Config::save_to_disk();
+    Serial::writeln("[SETUP] Configuration saved to disk");
     Serial::writeln("[SETUP] Finished. Your data is now persistent.");
 }

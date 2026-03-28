@@ -30,7 +30,11 @@ CXXFLAGS := \
     -mstackrealign       \
     -minline-all-stringops \
     -Iinclude            \
-    -Ikernel
+    -Ikernel             \
+    -Ikernel/features    \
+    -Ikernel/utils       \
+    -Ikernel/arch        \
+    -Ikernel/system
 
 ASMFLAGS := -f elf64
 
@@ -41,7 +45,7 @@ LDFLAGS  := \
 	-z max-page-size=0x1000
 
 # ── Source & Object Files ──
-CXX_SRCS := $(shell find kernel -name "*.cpp")
+CXX_SRCS := $(shell find kernel -name "*.cpp" 2>/dev/null)  # C++ disabled for pure ASM build
 ASM_SRCS := $(shell find . -name "*.asm")
 CXX_OBJS := $(CXX_SRCS:.cpp=.o)
 ASM_OBJS := $(ASM_SRCS:.asm=.o)

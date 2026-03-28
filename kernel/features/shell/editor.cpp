@@ -4,8 +4,8 @@
 // ==========================================
 
 #include "editor.hpp"
-#include <drivers/serial.hpp>
-#include <drivers/keyboard.hpp>
+#include <io/serial.hpp>
+#include <io/keyboard.hpp>
 #include <utils/string.hpp>
 
 namespace Editor {

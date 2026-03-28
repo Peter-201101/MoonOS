@@ -4,12 +4,13 @@
 // ==========================================
 
 #include "shell.hpp"
-#include <drivers/serial.hpp>
-#include <drivers/keyboard.hpp>
-#include <utils/string.hpp>
-#include <utils/io.hpp>
+#include <io/serial.hpp>
+#include <io/keyboard.hpp>
+#include <string.hpp>
+#include <io.hpp>
 #include "editor.hpp"
-#include <fs/fs.hpp>
+#include <storage/fs.hpp>
+#include <system/shutdown/shutdown.hpp>
 
 #define CMD_BUFFER_SIZE 256
 #define CMD_HISTORY_SIZE 32
@@ -27,7 +28,7 @@ namespace Shell {
     static void cmd_echo(int argc, char** argv);
     static void cmd_clear(int argc, char** argv);
     static void cmd_version(int argc, char** argv);
-    static void cmd_poweroff(int argc, char** argv);
+    static void cmd_shutdown(int argc, char** argv);
     static void cmd_edit(int argc, char** argv);
     // File system commands
     static void cmd_ls(int argc, char** argv);
@@ -58,7 +59,8 @@ namespace Shell {
         {"touch", cmd_touch, "Create empty file"},
         {"rm", cmd_rm, "Delete file/directory"},
         {"cat", cmd_cat, "Show file contents"},
-        {"poweroff", cmd_poweroff, "Shutdown system"},
+        {"shutdown", cmd_shutdown, "Shutdown system"},
+        {"poweroff", cmd_shutdown, "Shutdown system"},
         {nullptr, nullptr, nullptr} // sentinel
     };
 
@@ -126,10 +128,10 @@ namespace Shell {
         Serial::writeln("No GUI, pure CLI interface");
     }
 
-    static void cmd_poweroff([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {
-        Serial::writeln("Powering off...");
+    static void cmd_shutdown([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {
+        Serial::writeln("Shutting down...");
         shell_running = false;
-        __asm__ volatile("cli; hlt");
+        shutdown();
     }
 
     static void cmd_edit(int argc, char** argv) {
@@ -244,7 +246,6 @@ namespace Shell {
 
     void init() {
         Serial::writeln("\n[SHELL] Initializing CLI shell...");
-        Keyboard::init();
         history_count = 0;
         history_index = 0;
         shell_running = true;
@@ -368,8 +369,8 @@ namespace Shell {
                         break;
                     }
                     
-                    // Handle backspace
-                    if (c == '\b' && cursor_pos > 0) {
+                    // Handle backspace (both 0x08 '\b' and 0x7F DEL)
+                    if ((c == '\b' || c == 0x7F) && cursor_pos > 0) {
                         cursor_pos--;
                         cmd_len--;
                         // Shift remaining chars left
@@ -379,16 +380,17 @@ namespace Shell {
                         command_buffer[cmd_len] = '\0';
                         
                         // Erase on screen
-                        Serial::write("\b");
+                        Serial::write("\b \b");
                         // Redraw rest of line
                         for (uint32_t i = cursor_pos; i < cmd_len; i++) {
                             Serial::write_char(command_buffer[i]);
                         }
-                        Serial::write(" \b");
+                        Serial::write(" ");
                         // Move cursor back
                         for (uint32_t i = cursor_pos; i < cmd_len; i++) {
                             Serial::write("\b");
                         }
+                        Serial::write("\b");
                         
                         history_offset = -1; // Exit history mode
                         continue;

@@ -4,7 +4,7 @@
 // ==========================================
 
 #include "pmm.hpp"
-#include "../drivers/serial.hpp"
+#include <io/serial.hpp>
 
 static uint8_t* bitmap    = nullptr;
 static size_t   total_mem = 0;

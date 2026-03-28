@@ -5,7 +5,7 @@
 // ==========================================
 
 #include "vmm.hpp"
-#include "../drivers/serial.hpp"
+#include <io/serial.hpp>
 
 namespace VMM {
 

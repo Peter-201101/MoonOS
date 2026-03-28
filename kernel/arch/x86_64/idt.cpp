@@ -1,5 +1,5 @@
 #include "idt.hpp"
-#include <drivers/serial.hpp>
+#include <io/serial.hpp>
 #include <utils/io.hpp>
 
 static IDT::Entry idt_entries[256];

@@ -1,7 +1,7 @@
 #include "config.hpp"
-#include <drivers/disk/ata.hpp>
-#include <utils/string.hpp>
-#include <drivers/serial.hpp>
+#include <storage/ata.hpp>
+#include <string.hpp>
+#include <io/serial.hpp>
 
 static SystemConfig config;
 

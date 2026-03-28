@@ -1,6 +1,6 @@
 #include "ata.hpp"
-#include <utils/io.hpp>
-#include <drivers/serial.hpp>
+#include <io.hpp>
+#include <io/serial.hpp>
 
 #define ATA_DATA       0x1F0
 #define ATA_SECCOUNT   0x1F2

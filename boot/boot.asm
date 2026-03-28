@@ -24,7 +24,7 @@ stack_top:
 
 section .text
 global _start
-extern kernel_main
+extern asm_kernel_main
 
 _start:
     mov esp, stack_top
@@ -101,7 +101,7 @@ long_mode_start:
     and rsp, -16
 
     ; Panggil kernel
-    call kernel_main
+    call asm_kernel_main
 
     cli
 .hlt:

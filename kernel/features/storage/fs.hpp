@@ -35,6 +35,7 @@ namespace FS {
 
     // Directory operations
     bool mkdir(const char* dirname);           // Create directory
+    bool mkdir_root();                         // Create root directory (for setup)
     bool chdir(const char* dirname);           // Change directory
     bool pwd(char* path_buffer);               // Get current working directory
 
