@@ -22,10 +22,10 @@ char *strncpy(char *dst, const char *src, size_t n)
     return dst;
 }
 
-int strcmp(const char *a, const char *b)
+int strcmp(const char *s1, const char *s2)
 {
-    while (*a && *a == *b) { a++; b++; }
-    return (uint8_t)*a - (uint8_t)*b;
+    while (*s1 && (*s1 == *s2)) { s1++; s2++; }
+    return *(unsigned char *)s1 - *(unsigned char *)s2;
 }
 
 int strncmp(const char *a, const char *b, size_t n)

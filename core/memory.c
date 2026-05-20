@@ -6,28 +6,14 @@
 #include <include/kernel.h>
 #include <include/config.h>
 
-#define KERNEL_HEAP_START ((uintptr_t)&_end)
-
-/*
+/* --------------------------------------------------------------------------
  * Kernel Heap Allocator — Free List
- *
- * Layout tiap block di heap:
- *
- * ┌──────────────┬─────────────────────────┐
- * │  block_hdr_t │  data (user area)       │
- * │  (12 bytes)  │  (size bytes)           │
- * └──────────────┴─────────────────────────┘
- *
- * Free list: semua block bebas di-link sebagai linked list.
- * Waktu alloc → cari block yang cukup besar (first fit).
- * Waktu free  → kembalikan ke list, merge dengan neighbor kalau bisa.
- */
+ * -------------------------------------------------------------------------- */
 
 #define HEAP_MAGIC_FREE 0xDEADBEEF
 #define HEAP_MAGIC_USED 0xCAFEBABE
 #define HEAP_MIN_SPLIT  32          /* minimum sisa untuk di-split */
 #define ALIGN_BYTES     8           /* alignment 8 byte */
-#define HEAP_SIZE (1024 * 1024)
 
 typedef struct block_hdr {
     uint32_t        magic;    /* DEAD atau CAFE — detect corruption */
@@ -41,9 +27,9 @@ static block_hdr_t *heap_start = NULL;
 static uint32_t     heap_end   = 0;
 static uint32_t     heap_base  = 0;
 
-/*---------------------------------------------------------------------------
+/* --------------------------------------------------------------------------
  * Internal helpers
- *---------------------------------------------------------------------------*/
+ * -------------------------------------------------------------------------- */
 
 /* Expand heap dengan alokasi page baru dari PMM */
 static block_hdr_t *heap_expand(uint32_t min_size)
@@ -57,23 +43,24 @@ static block_hdr_t *heap_expand(uint32_t min_size)
         return NULL;
     }
 
+    /* Alokasi halaman fisik dari PMM — gunakan alamat yang diberikan apa adanya */
     uint32_t phys = pmm_alloc_n(pages);
-    if (!phys) return NULL;
-
-    if (phys != heap_end) {
-        pmm_free_n(phys, pages);
-        phys = heap_end;
-        pmm_reserve(phys, pages * PAGE_SIZE);
+    if (!phys) {
+        klog("[HEAP] pmm_alloc_n failed!\n");
+        return NULL;
     }
 
-    block_hdr_t *block = (block_hdr_t *)heap_end;
+    /* Inisialisasi blok baru di alamat fisik yang diberikan */
+    block_hdr_t *block = (block_hdr_t *)phys;
     block->magic = HEAP_MAGIC_FREE;
     block->size  = pages * PAGE_SIZE - sizeof(block_hdr_t);
     block->free  = 1;
     block->next  = NULL;
 
-    heap_end += pages * PAGE_SIZE;
+    /* Update heap_end ke akhir blok baru */
+    heap_end = phys + pages * PAGE_SIZE;
 
+    /* Sambungkan ke linked list heap */
     if (heap_start == NULL) {
         heap_start = block;
     } else {
@@ -81,10 +68,10 @@ static block_hdr_t *heap_expand(uint32_t min_size)
         while (cur->next) cur = cur->next;
         cur->next = block;
 
+        /* Merge dengan blok sebelumnya jika free */
         if (cur->free) {
             cur->size += sizeof(block_hdr_t) + block->size;
             cur->next  = NULL;
-            block = cur;
         }
     }
 
@@ -134,26 +121,26 @@ static void block_validate(block_hdr_t *block, const char *caller)
     }
 }
 
-/*---------------------------------------------------------------------------
+/* --------------------------------------------------------------------------
  * Public API
- *---------------------------------------------------------------------------*/
+ * -------------------------------------------------------------------------- */
 
 extern char _end;
 
 void heap_init(void)
 {
     heap_base  = (uintptr_t)&_end;
-    heap_start = (block_hdr_t *)heap_base;   // jangan NULL
-    heap_end   = heap_base;
+    heap_start = NULL;          /* Belum ada blok */
+    heap_end   = heap_base;     /* Awal mula */
 
+    /* Alokasi blok pertama (1 halaman) */
     block_hdr_t *initial = heap_expand(PAGE_SIZE - sizeof(block_hdr_t));
     if (!initial)
         PANIC("Failed to initialize kernel heap");
 
-    klog("[HEAP] Initialized at %x, size: %u KB\n",
-         heap_base, (heap_end - heap_base) / 1024);
+    klog("[HEAP] Initialized at %x (base %x), size: %u KB\n",
+         (uint32_t)initial, heap_base, (heap_end - heap_base) / 1024);
 }
-
 
 void *kmalloc(size_t size)
 {

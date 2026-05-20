@@ -2,6 +2,7 @@
 #include <mm/pmm.h>
 #include <core/panic.h>
 #include <include/kernel.h>
+#include <include/config.h>
 
 #ifdef ARCH_X86
 
@@ -26,6 +27,9 @@ static inline void tlb_flush(uint32_t virt)
     __asm__ volatile("invlpg (%0)" : : "r"(virt) : "memory");
 }
 
+/* Temporary mapping slot for initializing page tables (last identity-mapped page) */
+#define TEMP_PAGE_VIRT 0x7FF000
+
 static page_table_t *get_or_create_table(page_dir_t *pd, uint32_t pd_idx, uint32_t flags)
 {
     pde_t pde = pd->entries[pd_idx];
@@ -35,7 +39,17 @@ static page_table_t *get_or_create_table(page_dir_t *pd, uint32_t pd_idx, uint32
     uint32_t phys = pmm_alloc();
     if (!phys) PANIC("VMM: out of memory allocating page table");
 
-    page_table_t *table = (page_table_t *)phys;
+    /* Map the newly allocated page table into the temporary slot
+     * so we can write to it as a virtual address */
+    uint32_t temp_pd_idx = PD_INDEX(TEMP_PAGE_VIRT);
+    uint32_t temp_pt_idx = PT_INDEX(TEMP_PAGE_VIRT);
+    
+    pde_t temp_pde = kernel_dir.entries[temp_pd_idx];
+    page_table_t *temp_table = (page_table_t *)(temp_pde & ~0xFFF);
+    temp_table->entries[temp_pt_idx] = phys | PAGE_PRESENT | PAGE_WRITABLE;
+    tlb_flush(TEMP_PAGE_VIRT);
+
+    page_table_t *table = (page_table_t *)TEMP_PAGE_VIRT;
     for (uint32_t i = 0; i < PAGE_TBL_SIZE; i++)
         table->entries[i] = 0;
 
@@ -104,8 +118,32 @@ void vmm_init(void)
     for (uint32_t i = 0; i < PAGE_DIR_SIZE; i++)
         kernel_dir.entries[i] = 0;
 
-    for (uint32_t addr = 0; addr < 0x800000; addr += PAGE_SIZE)
-        vmm_map(&kernel_dir, addr, addr, PAGE_PRESENT | PAGE_WRITABLE);
+    /* Pre-allocate page tables for lower memory identity mapping.
+     * We need to create these manually before using vmm_map() */
+    page_table_t *pt0 = (page_table_t *)pmm_alloc();
+    page_table_t *pt1 = (page_table_t *)pmm_alloc();
+    
+    if (!pt0 || !pt1) PANIC("VMM: out of memory pre-allocating page tables");
+
+    /* Initialize page tables */
+    for (uint32_t i = 0; i < PAGE_TBL_SIZE; i++) {
+        pt0->entries[i] = 0;
+        pt1->entries[i] = 0;
+    }
+
+    /* Create page directory entries pointing to these page tables */
+    kernel_dir.entries[0] = ((uint32_t)pt0) | PAGE_PRESENT | PAGE_WRITABLE;
+    kernel_dir.entries[1] = ((uint32_t)pt1) | PAGE_PRESENT | PAGE_WRITABLE;
+
+    /* Now fill in the page table entries for identity mapping 0x0 to 0x800000 */
+    uint32_t paddr = 0;
+    for (uint32_t va = 0; va < 0x800000; va += PAGE_SIZE) {
+        uint32_t pt_idx = PT_INDEX(va);
+        uint32_t pd_idx = PD_INDEX(va);
+        page_table_t *pt = (pd_idx == 0) ? pt0 : pt1;
+        pt->entries[pt_idx] = paddr | PAGE_PRESENT | PAGE_WRITABLE;
+        paddr += PAGE_SIZE;
+    }
 
     klog("[VMM] Identity map: 0x0 - 0x800000\n");
     cr3_write((uint32_t)&kernel_dir);
