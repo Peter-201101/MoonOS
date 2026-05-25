@@ -1,20 +1,23 @@
 #include <types.h>
+#include <module.h>
+#include <hal/x86/boot/multiboot.h>
+#include <hal/x86/serial/serial_debug.h>
+#include <mm/pmm.h>
+#include <mm/vmm.h>
+#include <hal/x86/interrupt/idt.h>
+#include <hal/x86/interrupt/irq.h>
+#include <hal/x86/timer/pit.h>
+#include <core/panic.h>
+#include <include/kernel.h>   // untuk LOG_*, klog
+#include <display/display.h> // optional
+#include <types.h>
 #include <include/kernel.h>
 #include <core/panic.h>
 #include <core/memory.h>
 #include <core/task.h>
-#include <core/scheduler.h>
-#include <mm/pmm.h>
-#include <mm/vmm.h>
-#include <hal/x86/boot/multiboot.h>
-#include <hal/x86/serial/serial_debug.h>
-#include <hal/x86/interrupt/idt.h>
-#include <hal/x86/interrupt/irq.h>
-#include <hal/x86/timer/pit.h>
 
-/* Simbol dari linker script */
-extern uintptr_t _kernel_start;
-extern uintptr_t _kernel_end;
+extern module_t vga_module;
+extern uintptr_t _kernel_start, _kernel_end;
 
 /* Deklarasi fungsi dari komponen lain */
 void os_server_init(void);
@@ -52,9 +55,6 @@ void kernel_main(void)
     PANIC("kernel_main returned");
 }
 
-/* --------------------------------------------------------------------------
- * kmain – entry point x86
- * -------------------------------------------------------------------------- */
 void kmain(uint32_t magic, multiboot_info_t *mbi)
 {
     serial_debug_init();
@@ -84,13 +84,20 @@ void kmain(uint32_t magic, multiboot_info_t *mbi)
     pit_init();
     klog(LOG_OK "IDT + PIT: ready\n");
 
-    /* VGA tidak diinisialisasi dulu – akan ditambahkan setelah heap stabil */
-    klog(LOG_OK "VGA: skipped for now\n");
+    /* VGA module init (akan mendaftarkan display_ops) */
+    extern module_t vga_module;
+    vga_module.init();
+uint16_t *vga_test = (uint16_t*)0xB8000;
+for (int i = 0; i < 80; i++) {
+    vga_test[i] = 0x0F << 8 | ('A' + (i % 26));
+}
+    klog(LOG_OK "VGA: ready\n");
 
-    /* Lanjut ke kernel umum */
+    /* Di sini klog sudah mengirim ke layar VGA dan serial */
+
+    /* Lanjut ke kernel_main jika ada */
     kernel_main();
 
-    /* Aktifkan interrupt setelah scheduler? 
-       Di kernel_main sudah sti, jadi tidak perlu di sini */
-    PANIC("kmain returned");
+    /* Jika kernel_main tidak pernah kembali, jangan panik dulu */
+    /*for(;;);*/
 }

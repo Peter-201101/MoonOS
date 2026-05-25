@@ -2,6 +2,7 @@
 #define KERNEL_H
 
 #include <types.h>
+#include <stdarg.h>
 
 #define KERNEL_NAME     "MoonOS"
 #define KERNEL_VERSION  "0.1.0"
@@ -11,12 +12,15 @@
 #define LOG_WARN  "[WARN] "
 #define LOG_ERR   "[ERR]  "
 
-/* Abstract early print — diimplementasi per arch */
 #ifdef ARCH_X86
 #include <hal/x86/serial/serial_debug.h>
-#define kprint  serial_puts
-#define kprintf serial_printf
-#define klog(fmt, ...) serial_printf(fmt, ##__VA_ARGS__)
+#include <display/display.h>   // untuk vdisplay_printf
+
+// klog sekarang memanggil fungsi yang mengirim ke display + serial
+void klog_printf(const char *fmt, ...);
+
+#define klog(...) klog_printf(__VA_ARGS__)
+
 #endif
 
 #ifdef ARCH_ARM

@@ -17,7 +17,9 @@ X86_C_SRCS = core/kmain.c core/panic.c core/memory.c core/task.c     \
              hal/x86/boot/multiboot.c hal/x86/serial/serial_debug.c   \
              hal/x86/interrupt/idt.c hal/x86/interrupt/irq.c           \
              hal/x86/interrupt/pic.c hal/x86/timer/pit.c               \
-             lib/string.c lib/stdlib.c
+             core/klog.c												\
+             lib/string.c lib/stdlib.c								\
+			 hal/x86/interrupt/isr.c								
 
 X86_ASM_SRCS = boot/multiboot.asm boot/entry.asm                       \
                core/switch_context.asm hal/x86/interrupt/isr.asm
